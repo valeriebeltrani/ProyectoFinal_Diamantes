@@ -25,11 +25,13 @@ library(flextable)   # tablas a Word
 options(scipen = 999)
 theme_set(theme_tufte(base_size = 12))
 color_base <- "#e10f83"
+color_puntos <- "#08306B"   # azul oscuro para nubes/mapas de densidad
+color_linea  <- "#E66101"   # naranja para rectas de ajuste
 dir.create("graficas", showWarnings = FALSE)
 dir.create("tablas", showWarnings = FALSE)
  
 guardar_grafica <- function(p, nombre, ancho = 9, alto = 5) {
-  p <- p +
+  p <- p + 
     theme(
       plot.background = element_rect(fill = "white", color = NA),
       panel.background = element_rect(fill = "white", color = NA),
@@ -38,7 +40,6 @@ guardar_grafica <- function(p, nombre, ancho = 9, alto = 5) {
       axis.text = element_text(color = "black"),
       axis.title = element_text(color = "black")
     )
-
 
   ggsave(
     file.path("graficas", nombre),
@@ -61,8 +62,7 @@ a_word <- function(df, titulo, ruta, fuente = "Elaboración propia.") {
    save_as_docx(path = ruta)
 }
 
-
-# 1. CARGA Y CALIDAD DE LA BASE
+# 1. CARGA Y CALIDAD DE LA BASE 
 archivo_csv <- "diamonds.csv"
 crudo <- read_csv(archivo_csv, show_col_types = FALSE)
 cat("Filas:", nrow(crudo), "| Columnas:", ncol(crudo), "\n")
@@ -115,7 +115,6 @@ diamantes <- crudo |>
  
 cat("Valores faltantes por columna:\n")
 print(colSums(is.na(diamantes)))
-
 
 # 2. PREPARACIÓN DE VARIABLES
 # 2.1 Logaritmo natural
@@ -196,13 +195,11 @@ glosario <- tibble(
   )
 )
 
-
 a_word(
   glosario,
   "Glosario de categorías y códigos de los diamantes",
   "tablas/glosario_categorias.docx"
 )
-
 
 # 3. DATOS
 # 3.1 Mínimo, máximo y moda, media, mediana, desviación y asimetría
@@ -299,17 +296,29 @@ print(g_claridad)
 guardar_grafica(g_claridad, "g03_barras_claridad.png")
  
 g_disp_nivel <- ggplot(diamantes, aes(quilates, precio)) +
- geom_point(color = color_base, size = 0.6, alpha = 0.15) +
- geom_smooth(method = "lm", formula = y ~ x, color = "firebrick") +
- scale_y_continuous(labels = scales::label_dollar()) +
- labs(title = "Precio vs. quilates (nivel)", x = "Quilates", y = "Precio (USD)")
+  geom_bin2d(bins = 80) +
+  scale_fill_gradient(low = "#DEEBF7", high = color_puntos,
+                      trans = "log10", name = "N.° diamantes") +
+  geom_smooth(method = "lm", formula = y ~ x,
+              color = color_linea, linewidth = 1.3, se = FALSE) +
+  scale_y_continuous(labels = scales::label_dollar()) +
+  labs(title = "Precio vs. quilates (nivel)",
+       subtitle = "El color indica la densidad de diamantes en cada celda",
+       x = "Quilates", y = "Precio (USD)") +
+  theme(legend.position = "right")
 print(g_disp_nivel)
 guardar_grafica(g_disp_nivel, "g04_dispersion_precio_quilates.png")
  
 g_disp_log <- ggplot(diamantes, aes(quilates, ln_precio)) +
- geom_point(color = color_base, size = 0.6, alpha = 0.15) +
- geom_smooth(method = "lm", formula = y ~ x, color = "firebrick") +
- labs(title = "ln(Precio) vs. quilates", x = "Quilates", y = "ln(Precio)")
+  geom_bin2d(bins = 80) +
+  scale_fill_gradient(low = "#DEEBF7", high = color_puntos,
+                      trans = "log10", name = "N.° diamantes") +
+  geom_smooth(method = "lm", formula = y ~ x,
+              color = color_linea, linewidth = 1.3, se = FALSE) +
+  labs(title = "ln(Precio) vs. quilates",
+       subtitle = "El color indica la densidad de diamantes en cada celda",
+       x = "Quilates", y = "ln(Precio)") +
+  theme(legend.position = "right")
 print(g_disp_log)
 guardar_grafica(g_disp_log, "g05_dispersion_lnprecio_quilates.png")
  
@@ -328,9 +337,8 @@ correlaciones <- diamantes |>
            r_lnprecio_lnquilates = cor(ln_quilates, ln_precio))
 print(correlaciones)
 # La correlación describe asociación, NO causalidad.
-
-
-# 4. METODOLOGÍA
+ 
+# 4. METODOLOGÍA 
 # Corte transversal. Y = precio (USD) y ln(precio); Q = quilates.
 #   M1: precio    = b0 + b1*quilates + e
 #   M2: ln_precio = b0 + b1*quilates + e
@@ -355,12 +363,32 @@ f_m2 <- ln_precio ~ quilates
 f_m3 <- reformulate(c("quilates", controles), response = "precio")
 print(f_m1); print(f_m2); print(f_m3)
  
-# 5. RESULTADOS
+# 5. RESULTADOS 
 # 5.1 a 5.3 Estimación
 m1 <- lm(f_m1, data = diamantes)
 m2 <- lm(f_m2, data = diamantes)
 m3 <- lm(f_m3, data = diamantes)
  
+ # Tabla de regresiones M1, M2 y M3 en formato vertical (una columna por modelo)
+library(huxtable)
+
+tabla_regresiones <- huxreg(
+  "M1 simple lin-lin"   = m1,
+  "M2 simple log-lin"   = m2,
+  "M3 múltiple lin-lin" = m3,
+  statistics    = c("N" = "nobs", "R²" = "r.squared", "R² ajustado" = "adj.r.squared"),
+  number_format = 3
+)
+
+as_flextable(tabla_regresiones) |>
+  flextable::set_caption("Tabla. Resultados de las regresiones M1, M2 y M3") |>
+  flextable::autofit() |>
+  flextable::theme_vanilla() |>
+  flextable::add_footer_lines("Elaboración propia. Errores estándar entre paréntesis.") |>
+  flextable::save_as_docx(path = "tablas/tabla_regresiones.docx")
+
+cat("✅ tabla_regresiones.docx existe:", file.exists("tablas/tabla_regresiones.docx"), "\n")
+
 print(summ(m1)); print(summary(m1))
 print(summ(m2)); print(summary(m2))
 print(summ(m3)); print(summary(m3))
@@ -368,14 +396,30 @@ print(summ(m3)); print(summary(m3))
 # Revisión: si algún coeficiente sale NA hay colinealidad exacta y hay que quitar ese control
 cat("Coeficientes NA en M3 (debería ser 0):", sum(is.na(coef(m3))), "\n")
  
-# 5.4 Inferencia sobre la pendiente de quilates
-tabla_quilates <- bind_rows(
- tidy(m1, conf.int = TRUE) |> filter(term == "quilates") |> mutate(modelo = "M1 simple lin-lin"),
- tidy(m2, conf.int = TRUE) |> filter(term == "quilates") |> mutate(modelo = "M2 simple log-lin"),
- tidy(m3, conf.int = TRUE) |> filter(term == "quilates") |> mutate(modelo = "M3 múltiple lin-lin")
+# 5.4 Inferencia sobre la pendiente de quilates (tabla estilo Tabla 3 del caso)
+extraer_quilates <- function(modelo, nombre) {
+  broom::tidy(modelo, conf.int = TRUE) |>
+    dplyr::filter(term == "quilates") |>
+    dplyr::transmute(
+      modelo           = nombre,
+      Coeficiente      = estimate,
+      `Error estándar` = std.error,
+      `Estadístico t`  = statistic,
+      `Valor p`        = p.value,
+      `IC 95% inf.`    = conf.low,
+      `IC 95% sup.`    = conf.high
+    )
+}
+
+tabla_quilates <- dplyr::bind_rows(
+  extraer_quilates(m1, "M1"),
+  extraer_quilates(m2, "M2"),
+  extraer_quilates(m3, "M3")
 ) |>
- select(modelo, coeficiente = estimate, error_est = std.error, t = statistic,
-        valor_p = p.value, ic95_inf = conf.low, ic95_sup = conf.high)
+  tidyr::pivot_longer(-modelo, names_to = "Estadístico", values_to = "valor") |>
+  tidyr::pivot_wider(names_from = modelo, values_from = valor) |>
+  dplyr::mutate(dplyr::across(-Estadístico, ~ round(.x, 4)))
+
 print(tabla_quilates, width = Inf)
  
 # 5.5 Interpretación
@@ -423,22 +467,47 @@ resumen_modelos <- tibble(
 r2_ajustado = c(summary(m1)$adj.r.squared, summary(m2)$adj.r.squared, summary(m3)$adj.r.squared)
 )
 print(resumen_modelos)
+
+resumen_modelos |>
+  flextable::flextable() |>
+  flextable::set_caption("Tabla. Resumen de ajuste de los modelos") |>
+  flextable::colformat_double(digits = 3) |>
+  flextable::autofit() |>
+  flextable::theme_vanilla() |>
+  flextable::add_footer_lines("Elaboración propia. M1/M3 y M2 tienen distinta variable dependiente: R² no es comparable entre ellos (ver sección 8).") |>
+  flextable::save_as_docx(path = "tablas/resumen_modelos.docx")
+
 # M1/M3 y M2 tienen distinta variable dependiente: el R2 es solo referencia. La
 # comparación en la misma escala (USD) está en la sección 8.
- 
+ a_word(
+  resumen_modelos,
+  "Tabla. Resumen de ajuste de los modelos",
+  "tablas/resumen_modelos.docx",
+  fuente = "Elaboración propia. M1/M3 y M2 tienen distinta variable dependiente: R² no es comparable (ver sección 8)."
+)
+
+cat("✅ resumen_modelos.docx existe:", file.exists("tablas/resumen_modelos.docx"), "\n")
+
+
 # 5.8: log-log simple (coeficiente = elasticidad)
 m2_loglog <- lm(ln_precio ~ ln_quilates, data = diamantes)
 cat(sprintf("Opcional log-log simple: elasticidad = %.3f | R2 = %.3f\n",
            coef(m2_loglog)[["ln_quilates"]], summary(m2_loglog)$r.squared))
  
 g_disp_loglog <- ggplot(diamantes, aes(ln_quilates, ln_precio)) +
- geom_point(color = color_base, size = 0.6, alpha = 0.15) +
- geom_smooth(method = "lm", formula = y ~ x, color = "firebrick") +
- labs(title = "ln(Precio) vs. ln(Quilates)", x = "ln(Quilates)", y = "ln(Precio)")
+  geom_bin2d(bins = 80) +
+  scale_fill_gradient(low = "#DEEBF7", high = color_puntos,
+                      trans = "log10", name = "N.° diamantes") +
+  geom_smooth(method = "lm", formula = y ~ x,
+              color = color_linea, linewidth = 1.3, se = FALSE) +
+  labs(title = "ln(Precio) vs. ln(Quilates)",
+       subtitle = "El color indica la densidad de diamantes en cada celda",
+       x = "ln(Quilates)", y = "ln(Precio)") +
+  theme(legend.position = "right")
 print(g_disp_loglog)
 guardar_grafica(g_disp_loglog, "g07_dispersion_loglog.png")
  
-# 6. DIAGNÓSTICO: NORMALIDAD Y RESIDUOS
+# 6. DIAGNÓSTICO: NORMALIDAD Y RESIDUOS 
 residuos <- bind_rows(
  tibble(modelo = "M1 simple lineal-lineal",    residuo = as.numeric(resid(m1)), ajustado = as.numeric(fitted(m1))),
  tibble(modelo = "M2 simple log-lineal",       residuo = as.numeric(resid(m2)), ajustado = as.numeric(fitted(m2))),
@@ -468,14 +537,16 @@ guardar_grafica(g_res_qq, "g09_qq_residuos.png", ancho = 11)
 # Residuos vs. ajustados (muestra de 20.000 puntos por modelo para que el gráfico sea ligero)
 set.seed(123)
 g_res_aj <- residuos |>
- group_by(modelo) |>
- slice_sample(n = 20000) |>
- ungroup() |>
- ggplot(aes(ajustado, residuo)) +
- geom_point(size = 0.4, alpha = 0.25, color = color_base) +
- geom_hline(yintercept = 0, color = "firebrick") +
- facet_wrap(~ modelo, scales = "free") +
- labs(title = "Residuos vs. valores ajustados", x = "Valor ajustado", y = "Residuo")
+  group_by(modelo) |> slice_sample(n = 20000) |> ungroup() |>
+  ggplot(aes(ajustado, residuo)) +
+  geom_bin2d(bins = 70) +
+  scale_fill_gradient(low = "#DEEBF7", high = color_puntos,
+                      trans = "log10", name = "N.° diamantes") +
+  geom_hline(yintercept = 0, color = color_linea, linewidth = 0.8) +
+  facet_wrap(~ modelo, scales = "free") +
+  labs(title = "Residuos vs. valores ajustados",
+       x = "Valor ajustado", y = "Residuo") +
+  theme(legend.position = "right")
 print(g_res_aj)
 guardar_grafica(g_res_aj, "g10_residuos_vs_ajustados.png", ancho = 11)
  
@@ -484,8 +555,7 @@ set.seed(123)
 print(shapiro.test(sample(as.numeric(resid(m1)), 5000)))
 print(shapiro.test(sample(as.numeric(resid(m2)), 5000)))
 print(shapiro.test(sample(as.numeric(resid(m3)), 5000)))
-
-
+ 
 # 7. DIAGNÓSTICO: MULTICOLINEALIDAD, HETEROCEDASTICIDAD, INFLUYENTES Y ERRORES ROBUSTOS
 # 7.1 VIF del modelo múltiple. Con factores, car::vif entrega GVIF^(1/(2*Df)); se
 # compara con sqrt(5) = 2,24 
@@ -529,11 +599,11 @@ tabla_robusta <- bind_rows(robusto(m1, "M1"), robusto(m2, "M2"), robusto(m3, "M3
 print(tabla_robusta)
 # Lectura: si la significancia de quilates se mantiene con errores robustos, la
 # conclusión no depende del supuesto de varianza constante.
-
-                   
+ 
 # 8. COMPARACIÓN DE MODELOS EN LA MISMA ESCALA (USD)
-# El R2 no sirve para comparar M2 con M1/M3 (distinta Y),
-# así que se comparan los errores de predicción en USD. El corte es transversal: partición aleatoria 80/20.
+# Como en el Punto 7 del caso: el R2 no sirve para comparar M2 con M1/M3 (distinta Y),
+# así que se comparan los errores de predicción en USD. A diferencia del caso (serie
+# de tiempo, corte temporal), aquí es corte transversal: partición aleatoria 80/20.
 set.seed(123)
 idx <- sample(nrow(diamantes), size = round(0.8 * nrow(diamantes)))
 train <- droplevels(diamantes[idx, ])
@@ -557,9 +627,8 @@ tabla_pred <- bind_rows(
 )
 print(tabla_pred)
 cat("Observaciones de prueba:", nrow(test), "\n")
-
-                   
-# 9. TABLAS A WORD
+ 
+# 9. TABLAS A WORD 
 # 9.1 Tabla de regresión completa
 export_summs(m1, m2, m3,
             model.names = c("M1 simple lin-lin", "M2 simple log-lin", "M3 múltiple lin-lin"),
@@ -585,6 +654,7 @@ a_word(tabla_robusta,  "Pendiente de quilates con errores robustos (HC1)", "tabl
 a_word(tabla_pred,     "Errores de predicción en USD (partición 80/20)",   "tablas/tabla_prediccion.docx", fuente)
 
 
+
 # PARTE B: modelo 4, comparación de modelos, robustez y conclusiones
 #     M4: múltiple log-lineal   ln_precio ~ quilates + controles
 # Base: diamantes_limpio.rds (sale de la Parte A)
@@ -592,9 +662,7 @@ a_word(tabla_pred,     "Errores de predicción en USD (partición 80/20)",   "ta
 # Pregunta: ¿cuánto aumenta el precio de un diamante por cada quilate
 # adicional, teniendo en cuenta su color, claridad y corte?
 
-
 if (!exists("m3")) stop("Primero hay que correr diamantes.R (Parte A)")
-
 
 # error porcentual mediano de M1 a M3 (el promedio se dispara por las piedras
 # grandes). Se calcula primero para liberar memoria de los modelos de prueba.
@@ -622,7 +690,6 @@ inferencia_m4 <- tidy(m4, conf.int = TRUE) |>
             error_est = std.error, t = statistic, valor_p = p.value,
             ic95_inf = conf.low, ic95_sup = conf.high)
 print(inferencia_m4, width = Inf)
-
 
 f_global <- summary(m4)$fstatistic
 cat(sprintf("F global M4: F = %.1f, valor p = %.3g\n", f_global[1],
@@ -685,13 +752,11 @@ tabla_comparativa <- tibble(
 print(tabla_comparativa, width = Inf)
 # el R2 de M2 y M4 está en ln(precio), por eso se comparan los errores en USD
 
-
 export_summs(m1, m2, m3, m4, model.names = nombres_mod,
              statistics = c(N = "nobs", R2 = "r.squared",
                             "R2 ajustado" = "adj.r.squared"),
              omit.coefs = omitir, digits = 4, to.file = "docx",
              file.name = "tablas/tabla_regresion_4modelos_compacta.docx")
-
 
 ajustado_m3 <- as.numeric(fitted(m3))
 rm(modelos)
@@ -709,7 +774,6 @@ res_m4 <- tibble(
   mutate(precio_ajustado = mean(exp(residuo)) * exp(ajustado),
          residuo2 = residuo^2)
 
-
 tabla_normalidad <- bind_rows(
   filter(tabla_normalidad, !str_detect(modelo, "^M4")),
   tibble(modelo = "M4 múltiple log-lineal",
@@ -717,7 +781,6 @@ tabla_normalidad <- bind_rows(
          curtosis  = curtosis(res_m4$residuo))
 )
 print(tabla_normalidad)
-
 
 set.seed(123)
 muestra <- slice_sample(res_m4, n = 20000)
@@ -752,7 +815,6 @@ bp <- bind_rows(filter(bp, modelo != "M4"),
                        valor_p = bp_m4$p.value))
 print(bp)
 
-
 g_residuo2 <- ggplot(muestra, aes(ajustado, residuo2)) +
   geom_point(size = 0.4, alpha = 0.25, color = color_base) +
   geom_smooth(method = "loess", formula = y ~ x, se = FALSE, color = "firebrick") +
@@ -760,7 +822,6 @@ g_residuo2 <- ggplot(muestra, aes(ajustado, residuo2)) +
        x = "ln(precio) ajustado", y = "Residuo al cuadrado")
 print(g_residuo2)
 guardar_grafica(g_residuo2, "g12_m4_residuos_cuadrado.png")
-
 
 tabla_robusta <- bind_rows(filter(tabla_robusta, modelo != "M4"), robusto(m4, "M4"))
 print(tabla_robusta)
@@ -801,7 +862,6 @@ g_aj_real_ln <- ggplot(muestra, aes(ajustado, ln_precio)) +
 print(g_aj_real_ln)
 guardar_grafica(g_aj_real_ln, "g13_m4_ajustado_vs_real_ln.png")
 
-
 g_aj_real_usd <- ggplot(muestra, aes(precio_ajustado, precio)) +
   geom_point(size = 0.4, alpha = 0.25, color = color_base) +
   geom_abline(intercept = 0, slope = 1, color = "firebrick") +
@@ -832,7 +892,6 @@ errores_rango <- tibble(
             .groups = "drop")
 print(errores_rango, width = Inf)
 
-
 g_error2 <- errores_rango |>
   select(rango, RMSE_M3, RMSE_M4) |>
   pivot_longer(-rango, names_to = "modelo", values_to = "rmse") |>
@@ -853,7 +912,6 @@ limpiar <- function(x) if_else(is.finite(x), x, NA_real_)
 rstud  <- limpiar(rstudent(m4))
 cook_4 <- limpiar(cooks.distance(m4))
 
-
 tabla_raros <- tibble(
   criterio = c("Residuo estudentizado > 3", "Apalancamiento > 3p/n",
                "Distancia de Cook > 4/n"),
@@ -863,14 +921,12 @@ tabla_raros <- tibble(
 ) |> mutate(porcentaje = round(100 * diamantes / n_obs, 2))
 print(tabla_raros)
 
-
 top_raros <- diamantes |>
   mutate(rstud = rstud, precio_ajustado_M4 = res_m4$precio_ajustado) |>
   arrange(desc(abs(rstud))) |>
   slice_head(n = 10) |>
   select(precio, precio_ajustado_M4, quilates, color, claridad, forma, rstud)
 print(top_raros, width = Inf)
-
 
 # M4 sin los influyentes (no se borran de la base, solo se compara)
 quedan <- which(!(cook_4 > 4 / n_obs) | is.na(cook_4))
@@ -896,15 +952,12 @@ curt_m5 <- curtosis(resid(m5))
 rm(m5)
 invisible(gc())
 
-
 t5 <- lm(f_m5, data = train)
 pred_t5 <- mean(exp(resid(t5))) * exp(predict(t5, newdata = test))
 rm(t5)
 invisible(gc())
 
-
 cat(sprintf("M5 log-log: elasticidad = %.3f | R2 = %.3f\n", elasticidad, r2_m5))
-
 
 extension <- tibble(
   modelo = c("M4 múltiple log-lin", "M5 múltiple log-log"),
@@ -915,7 +968,7 @@ extension <- tibble(
 )
 print(extension, width = Inf)
 
-                       
+
 # 4. CIFRAS PARA LAS CONCLUSIONES
 cat(sprintf("Efecto de 0,1 quilates en M4: +%.1f%%\n", 100 * (exp(0.1 * b1_m4) - 1)))
 cat(sprintf("R2: M2 = %.3f | M4 = %.3f | M5 = %.3f\n",
@@ -926,7 +979,7 @@ cat(sprintf("Efecto de 1 quilate: %.1f%% con todos | %.1f%% sin influyentes\n",
 cat(sprintf("Elasticidad M5: %.2f (10%% más de quilates -> +%.1f%%)\n",
             elasticidad, 100 * (1.1^elasticidad - 1)))
 
-                       
+
 # 5. TABLAS A WORD
 a_word(inferencia_m4, "M4: inferencia sobre la pendiente de quilates",
        "tablas/tabla_m4_inferencia.docx", fuente)
