@@ -527,10 +527,12 @@ print(g_res_hist)
 guardar_grafica(g_res_hist, "g08_hist_residuos.png", ancho = 11)
  
 g_res_qq <- ggplot(residuos, aes(sample = residuo)) +
- stat_qq(size = 0.4, alpha = 0.3, color = color_base) +
- stat_qq_line(color = "firebrick") +
- facet_wrap(~ modelo, scales = "free") +
- labs(title = "QQ-plot de los residuos", x = "Cuantiles teóricos", y = "Cuantiles de los residuos")
+  stat_qq(size = 0.4, alpha = 0.10, color = color_puntos) +
+  stat_qq_line(color = color_linea, linewidth = 1.2) +
+  facet_wrap(~ modelo, scales = "free") +
+  labs(title = "QQ-plot de los residuos",
+       subtitle = "Los puntos se aclaran donde hay más observaciones superpuestas",
+       x = "Cuantiles teóricos", y = "Cuantiles de los residuos")
 print(g_res_qq)
 guardar_grafica(g_res_qq, "g09_qq_residuos.png", ancho = 11)
  
@@ -734,20 +736,44 @@ modelos <- list(m1, m2, m3, m4)
 coef_q  <- sapply(modelos, function(m) coef(m)[["quilates"]])
 
 tabla_comparativa <- tibble(
-  modelo    = nombres_mod,
-  y         = c("precio", "ln(precio)", "precio", "ln(precio)"),
-  controles = c("No", "No", "Sí", "Sí"),
-  coef_quilates = coef_q,
-  efecto_1_quilate = c(
-    sprintf("+%s USD", scales::comma(coef_q[1], accuracy = 1)),
-    sprintf("+%.1f%%", 100 * (exp(coef_q[2]) - 1)),
-    sprintf("+%s USD", scales::comma(coef_q[3], accuracy = 1)),
-    sprintf("+%.1f%%", 100 * (exp(coef_q[4]) - 1))),
-  r2          = sapply(modelos, function(m) summary(m)$r.squared),
-  r2_ajustado = sapply(modelos, function(m) summary(m)$adj.r.squared),
-  MAE  = tabla_pred$MAE,
-  RMSE = tabla_pred$RMSE,
-  error_pct_mediano = tabla_pred$error_pct_mediano
+  Estadístico = c("Variable dependiente", "Controles",
+                  "Coeficiente de quilates",
+                  "Efecto de 1 quilate",
+                  "R²", "R² ajustado",
+                  "MAE (USD)", "RMSE (USD)",
+                  "Error % mediano"),
+  M1 = c("precio", "No",
+         as.character(round(coef_q[1], 3)),
+         sprintf("%s USD", scales::comma(coef_q[1], accuracy = 1)),
+         round(summary(m1)$r.squared, 3),
+         round(summary(m1)$adj.r.squared, 3),
+         round(tabla_pred$MAE[1], 1),
+         round(tabla_pred$RMSE[1], 1),
+         round(tabla_pred$error_pct_mediano[1], 2)),
+  M2 = c("ln(precio)", "No",
+         as.character(round(coef_q[2], 3)),
+         sprintf("+%.1f%%", 100 * (exp(coef_q[2]) - 1)),
+         round(summary(m2)$r.squared, 3),
+         round(summary(m2)$adj.r.squared, 3),
+         round(tabla_pred$MAE[2], 1),
+         round(tabla_pred$RMSE[2], 1),
+         round(tabla_pred$error_pct_mediano[2], 2)),
+  M3 = c("precio", "Sí",
+         as.character(round(coef_q[3], 3)),
+         sprintf("%s USD", scales::comma(coef_q[3], accuracy = 1)),
+         round(summary(m3)$r.squared, 3),
+         round(summary(m3)$adj.r.squared, 3),
+         round(tabla_pred$MAE[3], 1),
+         round(tabla_pred$RMSE[3], 1),
+         round(tabla_pred$error_pct_mediano[3], 2)),
+  M4 = c("ln(precio)", "Sí",
+         as.character(round(coef_q[4], 3)),
+         sprintf("+%.1f%%", 100 * (exp(coef_q[4]) - 1)),
+         round(summary(m4)$r.squared, 3),
+         round(summary(m4)$adj.r.squared, 3),
+         round(tabla_pred$MAE[4], 1),
+         round(tabla_pred$RMSE[4], 1),
+         round(tabla_pred$error_pct_mediano[4], 2))
 )
 print(tabla_comparativa, width = Inf)
 # el R2 de M2 y M4 está en ln(precio), por eso se comparan los errores en USD
@@ -787,11 +813,16 @@ muestra <- slice_sample(res_m4, n = 20000)
 
 # 3.1 Linealidad
 g_lin_quilates <- ggplot(muestra, aes(quilates, residuo)) +
-  geom_point(size = 0.4, alpha = 0.25, color = color_base) +
-  geom_smooth(method = "loess", formula = y ~ x, se = FALSE, color = "firebrick") +
-  geom_hline(yintercept = 0, linetype = "dashed") +
-  labs(title = "M4: residuos frente a quilates", x = "Quilates",
-       y = "Residuo (escala ln)")
+  geom_bin2d(bins = 70) +
+  scale_fill_gradient(low = "#DEEBF7", high = color_puntos,
+                      trans = "log10", name = "N.° diamantes") +
+  geom_smooth(method = "loess", formula = y ~ x, se = FALSE,
+              color = color_linea, linewidth = 1.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey30") +
+  labs(title = "M4: residuos frente a quilates",
+       subtitle = "El color indica la densidad de diamantes en cada celda",
+       x = "Quilates", y = "Residuo (escala ln)") +
+  theme(legend.position = "right")
 print(g_lin_quilates)
 guardar_grafica(g_lin_quilates, "g11_m4_linealidad_quilates.png")
 
@@ -816,15 +847,27 @@ bp <- bind_rows(filter(bp, modelo != "M4"),
 print(bp)
 
 g_residuo2 <- ggplot(muestra, aes(ajustado, residuo2)) +
-  geom_point(size = 0.4, alpha = 0.25, color = color_base) +
-  geom_smooth(method = "loess", formula = y ~ x, se = FALSE, color = "firebrick") +
+  geom_bin2d(bins = 70) +
+  scale_fill_gradient(low = "#DEEBF7", high = color_puntos,
+                      trans = "log10", name = "N.° diamantes") +
+  geom_smooth(method = "loess", formula = y ~ x, se = FALSE,
+              color = color_linea, linewidth = 1.3) +
   labs(title = "M4: residuos al cuadrado frente a ajustados",
-       x = "ln(precio) ajustado", y = "Residuo al cuadrado")
+       subtitle = "El color indica la densidad de diamantes en cada celda",
+       x = "ln(precio) ajustado", y = "Residuo al cuadrado") +
+  theme(legend.position = "right")
 print(g_residuo2)
 guardar_grafica(g_residuo2, "g12_m4_residuos_cuadrado.png")
 
-tabla_robusta <- bind_rows(filter(tabla_robusta, modelo != "M4"), robusto(m4, "M4"))
-print(tabla_robusta)
+tabla_robusta_vertical <- bind_rows(
+  robusto(m1, "M1"), robusto(m2, "M2"),
+  robusto(m3, "M3"), robusto(m4, "M4")
+) |>
+  tidyr::pivot_longer(-modelo, names_to = "Estadístico", values_to = "valor") |>
+  tidyr::pivot_wider(names_from = modelo, values_from = valor) |>
+  dplyr::mutate(dplyr::across(-Estadístico, ~ round(.x, 4)))
+
+print(tabla_robusta_vertical, width = Inf)
 
 # 3.3 Multicolinealidad. Se compara GVIF^(1/(2*Df)) con sqrt(5) = 2,24
 # si car::vif falla (por ejemplo, por coeficientes NA) se hace el mismo
@@ -854,21 +897,31 @@ tabla_vif <- tryCatch(
 print(tabla_vif, n = Inf)
 
 # 3.4 Ajustados contra reales
-g_aj_real_ln <- ggplot(muestra, aes(ajustado, ln_precio)) +
-  geom_point(size = 0.4, alpha = 0.25, color = color_base) +
-  geom_abline(intercept = 0, slope = 1, color = "firebrick") +
+g_aj_real_In <- ggplot(muestra, aes(ajustado, ln_precio)) +
+  geom_bin2d(bins = 70) +
+  scale_fill_gradient(low = "#DEEBF7", high = color_puntos,
+                      trans = "log10", name = "N.° diamantes") +
+  geom_abline(intercept = 0, slope = 1,
+              color = color_linea, linewidth = 1.2) +
   labs(title = "M4: ln(precio) real frente a ajustado",
-       x = "ln(precio) ajustado", y = "ln(precio) real")
-print(g_aj_real_ln)
-guardar_grafica(g_aj_real_ln, "g13_m4_ajustado_vs_real_ln.png")
+       subtitle = "La línea naranja es la diagonal perfecta (y = x)",
+       x = "ln(precio) ajustado", y = "ln(precio) real") +
+  theme(legend.position = "right")
+print(g_aj_real_In)
+guardar_grafica(g_aj_real_In, "g13_m4_ajustado_vs_real_In.png")
 
 g_aj_real_usd <- ggplot(muestra, aes(precio_ajustado, precio)) +
-  geom_point(size = 0.4, alpha = 0.25, color = color_base) +
-  geom_abline(intercept = 0, slope = 1, color = "firebrick") +
+  geom_bin2d(bins = 70) +
+  scale_fill_gradient(low = "#DEEBF7", high = color_puntos,
+                      trans = "log10", name = "N.° diamantes") +
+  geom_abline(intercept = 0, slope = 1,
+              color = color_linea, linewidth = 1.2) +
   scale_x_log10(labels = scales::label_dollar()) +
   scale_y_log10(labels = scales::label_dollar()) +
   labs(title = "M4: precio real frente a ajustado (USD, ejes en log)",
-       x = "Precio ajustado (USD)", y = "Precio real (USD)")
+       subtitle = "La línea naranja es la diagonal perfecta (y = x)",
+       x = "Precio ajustado (USD)", y = "Precio real (USD)") +
+  theme(legend.position = "right")
 print(g_aj_real_usd)
 guardar_grafica(g_aj_real_usd, "g14_m4_ajustado_vs_real_usd.png")
 
